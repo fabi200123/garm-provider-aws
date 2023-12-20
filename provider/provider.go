@@ -59,26 +59,17 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 		return params.ProviderInstance{}, fmt.Errorf("failed to get runner spec: %w", err)
 	}
 
-	igwID, err := a.awsCli.CreateInternetGateway(ctx)
-	if err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to get internet gateway: %w", err)
-	}
-
-	vpcID, err := a.awsCli.CreateVpc(ctx, "10.10.0.0/16")
-	if err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to get VPC: %w", err)
-	}
-
-	if err := a.awsCli.AttachInternetGateway(ctx, igwID, vpcID); err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to attach internet gateway: %w", err)
-	}
-
-	subnetID, err := a.awsCli.CreateSubnet(ctx, vpcID, "10.10.0.0/24", spec.Region)
+	subnetID, err := a.awsCli.CreateSubnet(ctx, spec.VpcID, "10.10.0.0/24", spec.Region)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to create subnet: %w", err)
 	}
 
-	instanceID, err := a.awsCli.CreateRunningInstance(ctx, spec, subnetID)
+	groupID, err := a.awsCli.CreateSecurityGroup(ctx, spec.VpcID)
+	if err != nil {
+		return params.ProviderInstance{}, fmt.Errorf("failed to create security group: %w", err)
+	}
+
+	instanceID, err := a.awsCli.CreateRunningInstance(ctx, spec, subnetID, groupID)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to create instance: %w", err)
 	}
@@ -94,8 +85,13 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 }
 
 func (a *AwsProvider) DeleteInstance(ctx context.Context, instance string) error {
-	err := a.awsCli.TerminateInstance(ctx, instance)
-	if err != nil {
+	// Clear the security group
+	if err := a.awsCli.DeleteSecurityGroup(ctx, a.cfg.VpcID); err != nil {
+		return fmt.Errorf("failed to delete security group: %w", err)
+	}
+
+	// Terminate the instance
+	if err := a.awsCli.TerminateInstance(ctx, instance); err != nil {
 		return fmt.Errorf("failed to delete instance: %w", err)
 	}
 	return nil

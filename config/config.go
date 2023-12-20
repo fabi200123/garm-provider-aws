@@ -38,6 +38,7 @@ func NewConfig(cfgFile string) (*Config, error) {
 
 type Config struct {
 	Credentials Credentials `toml:"credentials"`
+	VpcID       string      `toml:"vpc_id"`
 	Region      string      `toml:"region"`
 }
 

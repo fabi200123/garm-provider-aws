@@ -41,6 +41,7 @@ func newExtraSpecsFromBootstrapData(data params.BootstrapInstance) (*extraSpecs,
 type extraSpecs struct {
 	MinCount int32
 	MaxCount int32
+	VpcID    string
 }
 
 func (e *extraSpecs) ensureValidExtraSpec() {
@@ -64,6 +65,7 @@ func GetRunnerSpecFromBootstrapParams(cfg config.Config, data params.BootstrapIn
 		BootstrapParams: data,
 		MinCount:        1,
 		MaxCount:        1,
+		VpcID:           cfg.VpcID,
 	}
 
 	spec.MergeExtraSpecs(extraSpecs)
@@ -79,6 +81,7 @@ type RunnerSpec struct {
 	UserData        string
 	MinCount        int32
 	MaxCount        int32
+	VpcID           string
 }
 
 func (r *RunnerSpec) Validate() error {
@@ -97,6 +100,9 @@ func (r *RunnerSpec) MergeExtraSpecs(extraSpecs *extraSpecs) {
 	}
 	if extraSpecs.MaxCount > 1 {
 		r.MaxCount = extraSpecs.MaxCount
+	}
+	if extraSpecs.VpcID != "" {
+		r.VpcID = extraSpecs.VpcID
 	}
 }
 
@@ -126,3 +132,5 @@ func (r *RunnerSpec) ComposeUserData() ([]byte, error) {
 	}
 	return nil, fmt.Errorf("unsupported OS type for cloud config: %s", r.BootstrapParams.OSType)
 }
+
+//TODO: Add method to add security group rules to the sec group
