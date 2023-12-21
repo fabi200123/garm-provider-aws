@@ -64,7 +64,7 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 		return params.ProviderInstance{}, fmt.Errorf("failed to create subnet: %w", err)
 	}
 
-	groupID, err := a.awsCli.CreateSecurityGroup(ctx, spec.VpcID)
+	groupID, err := a.awsCli.CreateSecurityGroup(ctx, spec.VpcID, spec)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to create security group: %w", err)
 	}

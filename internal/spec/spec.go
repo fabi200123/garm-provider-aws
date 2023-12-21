@@ -19,6 +19,8 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/cloudbase/garm-provider-aws/config"
 	"github.com/cloudbase/garm-provider-common/cloudconfig"
 	"github.com/cloudbase/garm-provider-common/params"
@@ -39,9 +41,10 @@ func newExtraSpecsFromBootstrapData(data params.BootstrapInstance) (*extraSpecs,
 }
 
 type extraSpecs struct {
-	MinCount int32
-	MaxCount int32
-	VpcID    string
+	MinCount         int32
+	MaxCount         int32
+	VpcID            string
+	OpenInboundPorts map[string][]int
 }
 
 func (e *extraSpecs) ensureValidExtraSpec() {
@@ -75,13 +78,14 @@ func GetRunnerSpecFromBootstrapParams(cfg config.Config, data params.BootstrapIn
 }
 
 type RunnerSpec struct {
-	Region          string
-	Tools           params.RunnerApplicationDownload
-	BootstrapParams params.BootstrapInstance
-	UserData        string
-	MinCount        int32
-	MaxCount        int32
-	VpcID           string
+	Region           string
+	Tools            params.RunnerApplicationDownload
+	BootstrapParams  params.BootstrapInstance
+	UserData         string
+	MinCount         int32
+	MaxCount         int32
+	VpcID            string
+	OpenInboundPorts map[string][]int
 }
 
 func (r *RunnerSpec) Validate() error {
@@ -133,4 +137,26 @@ func (r *RunnerSpec) ComposeUserData() ([]byte, error) {
 	return nil, fmt.Errorf("unsupported OS type for cloud config: %s", r.BootstrapParams.OSType)
 }
 
-//TODO: Add method to add security group rules to the sec group
+func (r RunnerSpec) SecurityRules() []types.IpPermission {
+	if len(r.OpenInboundPorts) == 0 {
+		return nil
+	}
+
+	var ret []types.IpPermission
+	for proto, ports := range r.OpenInboundPorts {
+		for _, port := range ports {
+			ret = append(ret, types.IpPermission{
+				IpProtocol: aws.String(proto),
+				FromPort:   aws.Int32(int32(port)),
+				ToPort:     aws.Int32(int32(port)),
+				IpRanges: []types.IpRange{
+					{
+						CidrIp:      aws.String("0.0.0.0/0"),
+						Description: aws.String(fmt.Sprintf("open inbound %s port %d", proto, port)),
+					},
+				},
+			})
+		}
+	}
+	return ret
+}

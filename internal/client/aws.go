@@ -154,7 +154,7 @@ func (a *AwsCli) CreateSubnet(ctx context.Context, vpcID string, cidr string, re
 	return *resp.Subnet.SubnetId, nil
 }
 
-func (a *AwsCli) CreateSecurityGroup(ctx context.Context, vpcID string) (string, error) {
+func (a *AwsCli) CreateSecurityGroup(ctx context.Context, vpcID string, spec *spec.RunnerSpec) (string, error) {
 	resp, err := a.client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
 		GroupName:   aws.String("GARM-SG-" + vpcID),
 		Description: aws.String("GARM-SG"),
@@ -176,6 +176,15 @@ func (a *AwsCli) CreateSecurityGroup(ctx context.Context, vpcID string) (string,
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to tag security group: %w", err)
+	}
+
+	rules := spec.SecurityRules()
+	_, err = a.client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       resp.GroupId,
+		IpPermissions: rules,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to authorize security group ingress: %w", err)
 	}
 
 	return *resp.GroupId, nil
