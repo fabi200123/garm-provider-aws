@@ -97,38 +97,52 @@ func (a *AwsProvider) DeleteInstance(ctx context.Context, instance string) error
 	return nil
 }
 
-// TODO: Implement this
 func (a *AwsProvider) GetInstance(ctx context.Context, instance string) (params.ProviderInstance, error) {
-	_, err := a.awsCli.GetInstance(ctx, instance)
+	awsInstance, err := a.awsCli.GetInstance(ctx, instance)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to get VM details: %w", err)
 	}
-	//TODO: write function to convert aws.Instance to params.ProviderInstance
-	details, err := params.ProviderInstance{}, nil
-	if err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to convert VM details: %w", err)
+	if awsInstance == nil {
+		return params.ProviderInstance{}, nil
 	}
-	return details, nil
+
+	providerInstance := params.ProviderInstance{
+		ProviderID: *awsInstance.InstanceId,
+		Name:       *awsInstance.Tags[0].Value,
+		Status:     params.InstanceStatus(awsInstance.State.Name),
+		OSType:     params.OSType(awsInstance.Platform),
+		OSArch:     params.OSArch(awsInstance.Architecture),
+		OSVersion:  *awsInstance.PlatformDetails,
+	}
+	return providerInstance, nil
 }
 
-// TODO: Implement this
 func (a *AwsProvider) ListInstances(ctx context.Context, poolID string) ([]params.ProviderInstance, error) {
-	instances, err := a.awsCli.ListDescribedInstances(ctx, poolID)
+	awsInstances, err := a.awsCli.ListDescribedInstances(ctx, poolID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list instances: %w", err)
 	}
 
-	if instances == nil {
-		return []params.ProviderInstance{}, nil
+	var providerInstances []params.ProviderInstance
+	for _, awsInstance := range awsInstances {
+		var name string
+		if len(awsInstance.Tags) > 0 {
+			name = *awsInstance.Tags[0].Value
+		}
+
+		pi := params.ProviderInstance{
+			ProviderID: *awsInstance.InstanceId,
+			Name:       name,
+			Status:     params.InstanceStatus(awsInstance.State.Name),
+			OSType:     params.OSType(awsInstance.Platform),
+			OSArch:     params.OSArch(awsInstance.Architecture),
+			OSVersion:  *awsInstance.PlatformDetails,
+		}
+
+		providerInstances = append(providerInstances, pi)
 	}
 
-	resp := make([]params.ProviderInstance, len(instances))
-	for idx := range instances {
-		//TODO: write function to convert aws.Instance to params.ProviderInstance
-		resp[idx] = params.ProviderInstance{}
-	}
-
-	return resp, nil
+	return providerInstances, nil
 }
 
 func (a *AwsProvider) RemoveAllInstances(ctx context.Context) error {

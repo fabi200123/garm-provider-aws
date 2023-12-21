@@ -31,10 +31,9 @@ func NewAwsCli(cfg *config.Config) (*AwsCli, error) {
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
 
-	//TODO: Add credentials in format that ec2.Options accepts
 	opts := ec2.Options{
 		Region:      cfg.Region,
-		Credentials: nil,
+		Credentials: config.StaticCredentialsProvider(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken),
 	}
 
 	client := ec2.New(opts)
@@ -84,7 +83,6 @@ func (a *AwsCli) StopInstance(ctx context.Context, vmName string) error {
 	return nil
 }
 
-// TODO: Find better way to get instance without the Instance struct
 func (a *AwsCli) GetInstance(ctx context.Context, vmName string) (*types.Instance, error) {
 	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
 		InstanceIds: []string{vmName},
@@ -112,19 +110,26 @@ func (a *AwsCli) TerminateInstance(ctx context.Context, vmName string) error {
 	return nil
 }
 
-// TODO: find better method to get all instances
 func (a *AwsCli) ListDescribedInstances(ctx context.Context, poolID string) ([]types.Instance, error) {
-	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{})
+	filters := []types.Filter{
+		{
+			Name:   aws.String("tag:PoolID"),
+			Values: []string{poolID},
+		},
+	}
+
+	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters: filters,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
 
-	var instances []types.Instance
-	for _, reservation := range resp.Reservations {
-		instances = append(instances, reservation.Instances...)
+	if len(resp.Reservations) == 0 || len(resp.Reservations[0].Instances) == 0 {
+		return nil, fmt.Errorf("instance not found")
 	}
 
-	return instances, nil
+	return resp.Reservations[0].Instances, nil
 }
 
 // Create subnet

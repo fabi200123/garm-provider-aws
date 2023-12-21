@@ -15,12 +15,11 @@
 package config
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/BurntSushi/toml"
 	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/credentials"
 )
 
 // NewConfig returns a new Config
@@ -89,11 +88,7 @@ func (c Credentials) GetCredentials() (aws.Credentials, error) {
 	return creds, nil
 }
 
-func Retrieve(ctx context.Context) (aws.Credentials, error) {
-	cfg, err := config.LoadDefaultConfig(ctx)
-	if err != nil {
-		return aws.Credentials{}, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	return cfg.Credentials.Retrieve(ctx)
+// StaticCredentialsProvider creates a credentials provider from static credentials.
+func StaticCredentialsProvider(accessKeyID, secretAccessKey, sessionToken string) aws.CredentialsProvider {
+	return credentials.NewStaticCredentialsProvider(accessKeyID, secretAccessKey, sessionToken)
 }
