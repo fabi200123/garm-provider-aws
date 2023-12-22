@@ -38,6 +38,7 @@ func NewAwsProvider(configPath, controllerID string) (execution.ExternalProvider
 	}
 
 	return &AwsProvider{
+		cfg:          conf,
 		controllerID: controllerID,
 		awsCli:       awsCli,
 	}, nil
@@ -54,7 +55,7 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 		return params.ProviderInstance{}, fmt.Errorf("unsupported architecture: %s", bootstrapParams.OSArch)
 	}
 
-	spec, err := spec.GetRunnerSpecFromBootstrapParams(*a.cfg, bootstrapParams, a.controllerID)
+	spec, err := spec.GetRunnerSpecFromBootstrapParams(a.cfg, bootstrapParams, a.controllerID)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to get runner spec: %w", err)
 	}

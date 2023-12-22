@@ -52,7 +52,7 @@ func (e *extraSpecs) ensureValidExtraSpec() {
 
 }
 
-func GetRunnerSpecFromBootstrapParams(cfg config.Config, data params.BootstrapInstance, controllerID string) (*RunnerSpec, error) {
+func GetRunnerSpecFromBootstrapParams(cfg *config.Config, data params.BootstrapInstance, controllerID string) (*RunnerSpec, error) {
 	tools, err := util.GetTools(data.OSType, data.OSArch, data.Tools)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get tools: %s", err)
