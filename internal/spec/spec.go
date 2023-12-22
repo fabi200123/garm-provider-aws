@@ -41,10 +41,11 @@ func newExtraSpecsFromBootstrapData(data params.BootstrapInstance) (*extraSpecs,
 }
 
 type extraSpecs struct {
-	MinCount         int32
-	MaxCount         int32
-	VpcID            string
-	OpenInboundPorts map[string][]int
+	MinCount           int32
+	MaxCount           int32
+	VpcID              string
+	OpenInboundPorts   map[string][]int
+	BlockDeviceMapping string
 }
 
 func (e *extraSpecs) ensureValidExtraSpec() {
@@ -78,14 +79,15 @@ func GetRunnerSpecFromBootstrapParams(cfg config.Config, data params.BootstrapIn
 }
 
 type RunnerSpec struct {
-	Region           string
-	Tools            params.RunnerApplicationDownload
-	BootstrapParams  params.BootstrapInstance
-	UserData         string
-	MinCount         int32
-	MaxCount         int32
-	VpcID            string
-	OpenInboundPorts map[string][]int
+	Region             string
+	Tools              params.RunnerApplicationDownload
+	BootstrapParams    params.BootstrapInstance
+	UserData           string
+	MinCount           int32
+	MaxCount           int32
+	VpcID              string
+	OpenInboundPorts   map[string][]int
+	BlockDeviceMapping string
 }
 
 func (r *RunnerSpec) Validate() error {
@@ -107,6 +109,9 @@ func (r *RunnerSpec) MergeExtraSpecs(extraSpecs *extraSpecs) {
 	}
 	if extraSpecs.VpcID != "" {
 		r.VpcID = extraSpecs.VpcID
+	}
+	if extraSpecs.BlockDeviceMapping != "" {
+		r.BlockDeviceMapping = extraSpecs.BlockDeviceMapping
 	}
 }
 
@@ -157,6 +162,18 @@ func (r RunnerSpec) SecurityRules() []types.IpPermission {
 				},
 			})
 		}
+	}
+	return ret
+}
+
+func (r RunnerSpec) BlockDeviceMappings() []types.BlockDeviceMapping {
+	if r.BlockDeviceMapping == "" {
+		return nil
+	}
+
+	var ret []types.BlockDeviceMapping
+	if err := json.Unmarshal([]byte(r.BlockDeviceMapping), &ret); err != nil {
+		return nil
 	}
 	return ret
 }

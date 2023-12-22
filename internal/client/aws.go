@@ -213,14 +213,17 @@ func (a *AwsCli) CreateRunningInstance(ctx context.Context, spec *spec.RunnerSpe
 		return "", fmt.Errorf("invalid nil runner spec")
 	}
 
+	blockDeviceMap := spec.BlockDeviceMappings()
+
 	resp, err := a.client.RunInstances(ctx, &ec2.RunInstancesInput{
-		ImageId:        aws.String(spec.BootstrapParams.Image),
-		InstanceType:   types.InstanceType(spec.BootstrapParams.Flavor),
-		MaxCount:       aws.Int32(spec.MaxCount),
-		MinCount:       aws.Int32(spec.MinCount),
-		SubnetId:       aws.String(subnetID),
-		SecurityGroups: []string{groupID},
-		UserData:       aws.String(spec.UserData),
+		ImageId:             aws.String(spec.BootstrapParams.Image),
+		InstanceType:        types.InstanceType(spec.BootstrapParams.Flavor),
+		MaxCount:            aws.Int32(spec.MaxCount),
+		MinCount:            aws.Int32(spec.MinCount),
+		SubnetId:            aws.String(subnetID),
+		SecurityGroups:      []string{groupID},
+		BlockDeviceMappings: blockDeviceMap,
+		UserData:            aws.String(spec.UserData),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create instance: %w", err)
