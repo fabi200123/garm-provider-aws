@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -30,10 +31,10 @@ func NewAwsCli(cfg *config.Config) (*AwsCli, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get credentials: %w", err)
 	}
-	//TODO: Add credentials in format that ec2.Options accepts
+
 	opts := ec2.Options{
 		Region:      cfg.Region,
-		Credentials: nil,
+		Credentials: config.StaticCredentialsProvider(creds.AccessKeyID, creds.SecretAccessKey, creds.SessionToken),
 	}
 
 	client := ec2.New(opts)
@@ -83,10 +84,24 @@ func (a *AwsCli) StopInstance(ctx context.Context, vmName string) error {
 	return nil
 }
 
-// TODO: Find better way to get instance without the Instance struct
+// Describes the specified instances or all instances. If you specify instance
+// IDs, the output includes information for only the specified instances. If you
+// specify filters, the output includes information for only those instances that
+// meet the filter criteria.
 func (a *AwsCli) GetInstance(ctx context.Context, vmName string) (*types.Instance, error) {
+	instanceID := ""
+	if strings.HasPrefix(vmName, "i-") {
+		instanceID = vmName
+		vmName = ""
+	}
 	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{vmName},
+		InstanceIds: []string{instanceID},
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:Name"),
+				Values: []string{vmName},
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
@@ -111,82 +126,27 @@ func (a *AwsCli) TerminateInstance(ctx context.Context, vmName string) error {
 	return nil
 }
 
-// TODO: find better method to get all instances
 func (a *AwsCli) ListDescribedInstances(ctx context.Context, poolID string) ([]types.Instance, error) {
-	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{})
+	filters := []types.Filter{
+		{
+			Name:   aws.String("tag:PoolID"),
+			Values: []string{poolID},
+		},
+	}
+
+	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
+		Filters: filters,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
 	}
 
-	var instances []types.Instance
-	for _, reservation := range resp.Reservations {
-		instances = append(instances, reservation.Instances...)
+	if len(resp.Reservations) == 0 || len(resp.Reservations[0].Instances) == 0 {
+		return nil, fmt.Errorf("instance not found")
 	}
 
-	return instances, nil
+	return resp.Reservations[0].Instances, nil
 }
-
-// Used to get IGW ID for VPC
-func (a *AwsCli) CreateInternetGateway(ctx context.Context) (string, error) {
-	resp, err := a.client.CreateInternetGateway(ctx, &ec2.CreateInternetGatewayInput{})
-	if err != nil {
-		return "", fmt.Errorf("failed to create internet gateway: %w", err)
-	}
-
-	//Tag the internet gateway with GARM-IGW tag
-	_, err = a.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{*resp.InternetGateway.InternetGatewayId},
-		Tags: []types.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String("GARM-IGW"),
-			},
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to tag internet gateway: %w", err)
-	}
-	return *resp.InternetGateway.InternetGatewayId, nil
-}
-
-// Used to get VPC ID
-func (a *AwsCli) CreateVpc(ctx context.Context, cidr string) (string, error) {
-	resp, err := a.client.CreateVpc(ctx, &ec2.CreateVpcInput{
-		CidrBlock: aws.String(cidr),
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to create VPC: %w", err)
-	}
-
-	//Tag the VPC with GARM-VPC tag
-	_, err = a.client.CreateTags(ctx, &ec2.CreateTagsInput{
-		Resources: []string{*resp.Vpc.VpcId},
-		Tags: []types.Tag{
-			{
-				Key:   aws.String("Name"),
-				Value: aws.String("GARM-VPC"),
-			},
-		},
-	})
-	if err != nil {
-		return "", fmt.Errorf("failed to tag VPC: %w", err)
-	}
-	return *resp.Vpc.VpcId, nil
-}
-
-// Attach IGW to VPC
-func (a *AwsCli) AttachInternetGateway(ctx context.Context, igwID, vpcID string) error {
-	_, err := a.client.AttachInternetGateway(ctx, &ec2.AttachInternetGatewayInput{
-		InternetGatewayId: aws.String(igwID),
-		VpcId:             aws.String(vpcID),
-	})
-	if err != nil {
-		return fmt.Errorf("failed to attach internet gateway: %w", err)
-	}
-	return nil
-}
-
-//TODO: Create route for GW  and VPC?
 
 // Create subnet
 func (a *AwsCli) CreateSubnet(ctx context.Context, vpcID string, cidr string, region string) (string, error) {
@@ -215,20 +175,71 @@ func (a *AwsCli) CreateSubnet(ctx context.Context, vpcID string, cidr string, re
 	return *resp.Subnet.SubnetId, nil
 }
 
+func (a *AwsCli) CreateSecurityGroup(ctx context.Context, vpcID string, spec *spec.RunnerSpec) (string, error) {
+	resp, err := a.client.CreateSecurityGroup(ctx, &ec2.CreateSecurityGroupInput{
+		GroupName:   aws.String("GARM-SG-" + vpcID),
+		Description: aws.String("GARM-SG"),
+		VpcId:       aws.String(vpcID),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to create security group: %w", err)
+	}
+
+	//Tag the security group with GARM-SG tag
+	_, err = a.client.CreateTags(ctx, &ec2.CreateTagsInput{
+		Resources: []string{*resp.GroupId},
+		Tags: []types.Tag{
+			{
+				Key:   aws.String("Name"),
+				Value: aws.String("GARM-SG"),
+			},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to tag security group: %w", err)
+	}
+
+	rules := spec.SecurityRules()
+	_, err = a.client.AuthorizeSecurityGroupIngress(ctx, &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       resp.GroupId,
+		IpPermissions: rules,
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to authorize security group ingress: %w", err)
+	}
+
+	return *resp.GroupId, nil
+}
+
+func (a *AwsCli) DeleteSecurityGroup(ctx context.Context, vpcID string) error {
+	_, err := a.client.DeleteSecurityGroup(ctx, &ec2.DeleteSecurityGroupInput{
+		GroupName: aws.String("GARM-SG-" + vpcID),
+	})
+	if err != nil {
+		return fmt.Errorf("failed to delete security group: %w", err)
+	}
+
+	return nil
+}
+
 // TODO: Find a better way to implement this
-func (a *AwsCli) CreateRunningInstance(ctx context.Context, spec *spec.RunnerSpec, subnetID string) (string, error) {
+func (a *AwsCli) CreateRunningInstance(ctx context.Context, spec *spec.RunnerSpec, subnetID, groupID string) (string, error) {
 
 	if spec == nil {
 		return "", fmt.Errorf("invalid nil runner spec")
 	}
 
+	blockDeviceMap := spec.BlockDeviceMappings()
+
 	resp, err := a.client.RunInstances(ctx, &ec2.RunInstancesInput{
-		ImageId:      aws.String(spec.BootstrapParams.Image),
-		InstanceType: types.InstanceType(spec.BootstrapParams.Flavor),
-		MaxCount:     aws.Int32(spec.MaxCount),
-		MinCount:     aws.Int32(spec.MinCount),
-		SubnetId:     aws.String(subnetID),
-		UserData:     aws.String(spec.UserData),
+		ImageId:             aws.String(spec.BootstrapParams.Image),
+		InstanceType:        types.InstanceType(spec.BootstrapParams.Flavor),
+		MaxCount:            aws.Int32(spec.MaxCount),
+		MinCount:            aws.Int32(spec.MinCount),
+		SubnetId:            aws.String(subnetID),
+		SecurityGroups:      []string{groupID},
+		BlockDeviceMappings: blockDeviceMap,
+		UserData:            aws.String(spec.UserData),
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create instance: %w", err)
