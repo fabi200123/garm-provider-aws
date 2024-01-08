@@ -92,9 +92,16 @@ func (a *AwsProvider) DeleteInstance(ctx context.Context, instance string) error
 	}
 
 	// Terminate the instance
-	if err := a.awsCli.TerminateInstance(ctx, instance); err != nil {
-		return fmt.Errorf("failed to delete instance: %w", err)
+	awsInstance, err := a.awsCli.GetInstance(ctx, instance)
+	if err != nil {
+		return fmt.Errorf("failed to find the instance: %w", err)
 	}
+	if awsInstance == nil {
+		return nil
+	}
+	awsInstanceID := *awsInstance.InstanceId
+	a.awsCli.TerminateInstance(ctx, awsInstanceID)
+
 	return nil
 }
 

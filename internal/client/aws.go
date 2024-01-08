@@ -17,6 +17,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/ec2"
@@ -83,9 +84,24 @@ func (a *AwsCli) StopInstance(ctx context.Context, vmName string) error {
 	return nil
 }
 
+// Describes the specified instances or all instances. If you specify instance
+// IDs, the output includes information for only the specified instances. If you
+// specify filters, the output includes information for only those instances that
+// meet the filter criteria.
 func (a *AwsCli) GetInstance(ctx context.Context, vmName string) (*types.Instance, error) {
+	instanceID := ""
+	if strings.HasPrefix(vmName, "i-") {
+		instanceID = vmName
+		vmName = ""
+	}
 	resp, err := a.client.DescribeInstances(ctx, &ec2.DescribeInstancesInput{
-		InstanceIds: []string{vmName},
+		InstanceIds: []string{instanceID},
+		Filters: []types.Filter{
+			{
+				Name:   aws.String("tag:Name"),
+				Values: []string{vmName},
+			},
+		},
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to get instance: %w", err)
