@@ -43,7 +43,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	prov, err := provider.NewAwsProvider(executionEnv.ProviderConfigFile, executionEnv.ControllerID)
+	prov, err := provider.NewAwsProvider(ctx, executionEnv.ProviderConfigFile, executionEnv.ControllerID)
 	if err != nil {
 		log.Fatal(err)
 	}

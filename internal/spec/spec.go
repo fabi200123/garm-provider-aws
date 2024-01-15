@@ -19,8 +19,6 @@ import (
 	"encoding/json"
 	"fmt"
 
-	"github.com/aws/aws-sdk-go-v2/aws"
-	"github.com/aws/aws-sdk-go-v2/service/ec2/types"
 	"github.com/cloudbase/garm-provider-aws/config"
 	"github.com/cloudbase/garm-provider-common/cloudconfig"
 	"github.com/cloudbase/garm-provider-common/params"
@@ -35,21 +33,12 @@ func newExtraSpecsFromBootstrapData(data params.BootstrapInstance) (*extraSpecs,
 			return nil, fmt.Errorf("failed to unmarshal extra specs: %w", err)
 		}
 	}
-	spec.ensureValidExtraSpec()
 
 	return spec, nil
 }
 
 type extraSpecs struct {
-	MinCount           int32
-	MaxCount           int32
-	VpcID              string
-	OpenInboundPorts   map[string][]int
-	BlockDeviceMapping string
-}
-
-func (e *extraSpecs) ensureValidExtraSpec() {
-
+	SubnetID *string `json:"subnet_id,omitempty"`
 }
 
 func GetRunnerSpecFromBootstrapParams(cfg *config.Config, data params.BootstrapInstance, controllerID string) (*RunnerSpec, error) {
@@ -67,9 +56,8 @@ func GetRunnerSpecFromBootstrapParams(cfg *config.Config, data params.BootstrapI
 		Region:          cfg.Region,
 		Tools:           tools,
 		BootstrapParams: data,
-		MinCount:        1,
-		MaxCount:        1,
-		VpcID:           cfg.VpcID,
+		SubnetID:        cfg.SubnetID,
+		ControllerID:    controllerID,
 	}
 
 	spec.MergeExtraSpecs(extraSpecs)
@@ -79,15 +67,12 @@ func GetRunnerSpecFromBootstrapParams(cfg *config.Config, data params.BootstrapI
 }
 
 type RunnerSpec struct {
-	Region             string
-	Tools              params.RunnerApplicationDownload
-	BootstrapParams    params.BootstrapInstance
-	UserData           string
-	MinCount           int32
-	MaxCount           int32
-	VpcID              string
-	OpenInboundPorts   map[string][]int
-	BlockDeviceMapping string
+	Region          string
+	Tools           params.RunnerApplicationDownload
+	BootstrapParams params.BootstrapInstance
+	UserData        string
+	SubnetID        string
+	ControllerID    string
 }
 
 func (r *RunnerSpec) Validate() error {
@@ -101,17 +86,8 @@ func (r *RunnerSpec) Validate() error {
 }
 
 func (r *RunnerSpec) MergeExtraSpecs(extraSpecs *extraSpecs) {
-	if extraSpecs.MinCount > 1 {
-		r.MinCount = extraSpecs.MinCount
-	}
-	if extraSpecs.MaxCount > 1 {
-		r.MaxCount = extraSpecs.MaxCount
-	}
-	if extraSpecs.VpcID != "" {
-		r.VpcID = extraSpecs.VpcID
-	}
-	if extraSpecs.BlockDeviceMapping != "" {
-		r.BlockDeviceMapping = extraSpecs.BlockDeviceMapping
+	if extraSpecs.SubnetID != nil && *extraSpecs.SubnetID != "" {
+		r.SubnetID = *extraSpecs.SubnetID
 	}
 }
 
@@ -132,48 +108,19 @@ func (r *RunnerSpec) SetUserData() error {
 
 func (r *RunnerSpec) ComposeUserData() ([]byte, error) {
 	switch r.BootstrapParams.OSType {
-	case params.Linux, params.Windows:
+	case params.Linux:
 		udata, err := cloudconfig.GetCloudConfig(r.BootstrapParams, r.Tools, r.BootstrapParams.Name)
 		if err != nil {
 			return nil, fmt.Errorf("failed to generate userdata: %w", err)
 		}
 		return []byte(udata), nil
+	case params.Windows:
+		udata, err := cloudconfig.GetCloudConfig(r.BootstrapParams, r.Tools, r.BootstrapParams.Name)
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate userdata: %w", err)
+		}
+		wrapped := fmt.Sprintf("<powershell>%s</powershell>", udata)
+		return []byte(wrapped), err
 	}
 	return nil, fmt.Errorf("unsupported OS type for cloud config: %s", r.BootstrapParams.OSType)
-}
-
-func (r RunnerSpec) SecurityRules() []types.IpPermission {
-	if len(r.OpenInboundPorts) == 0 {
-		return nil
-	}
-
-	var ret []types.IpPermission
-	for proto, ports := range r.OpenInboundPorts {
-		for _, port := range ports {
-			ret = append(ret, types.IpPermission{
-				IpProtocol: aws.String(proto),
-				FromPort:   aws.Int32(int32(port)),
-				ToPort:     aws.Int32(int32(port)),
-				IpRanges: []types.IpRange{
-					{
-						CidrIp:      aws.String("0.0.0.0/0"),
-						Description: aws.String(fmt.Sprintf("open inbound %s port %d", proto, port)),
-					},
-				},
-			})
-		}
-	}
-	return ret
-}
-
-func (r RunnerSpec) BlockDeviceMappings() []types.BlockDeviceMapping {
-	if r.BlockDeviceMapping == "" {
-		return nil
-	}
-
-	var ret []types.BlockDeviceMapping
-	if err := json.Unmarshal([]byte(r.BlockDeviceMapping), &ret); err != nil {
-		return nil
-	}
-	return ret
 }

@@ -16,23 +16,26 @@ package provider
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/cloudbase/garm-provider-aws/config"
 	"github.com/cloudbase/garm-provider-aws/internal/client"
 	"github.com/cloudbase/garm-provider-aws/internal/spec"
+	garmErrors "github.com/cloudbase/garm-provider-common/errors"
 	"github.com/cloudbase/garm-provider-common/execution"
 	"github.com/cloudbase/garm-provider-common/params"
 )
 
 var _ execution.ExternalProvider = &AwsProvider{}
 
-func NewAwsProvider(configPath, controllerID string) (execution.ExternalProvider, error) {
+func NewAwsProvider(ctx context.Context, configPath, controllerID string) (execution.ExternalProvider, error) {
 	conf, err := config.NewConfig(configPath)
 	if err != nil {
 		return nil, fmt.Errorf("error loading config: %w", err)
 	}
-	awsCli, err := client.NewAwsCli(conf)
+	awsCli, err := client.NewAwsCli(ctx, conf)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AWS CLI: %w", err)
 	}
@@ -60,17 +63,7 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 		return params.ProviderInstance{}, fmt.Errorf("failed to get runner spec: %w", err)
 	}
 
-	subnetID, err := a.awsCli.CreateSubnet(ctx, spec.VpcID, "10.10.0.0/24", spec.Region)
-	if err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to create subnet: %w", err)
-	}
-
-	groupID, err := a.awsCli.CreateSecurityGroup(ctx, spec.VpcID, spec)
-	if err != nil {
-		return params.ProviderInstance{}, fmt.Errorf("failed to create security group: %w", err)
-	}
-
-	instanceID, err := a.awsCli.CreateRunningInstance(ctx, spec, subnetID, groupID)
+	instanceID, err := a.awsCli.CreateRunningInstance(ctx, spec)
 	if err != nil {
 		return params.ProviderInstance{}, fmt.Errorf("failed to create instance: %w", err)
 	}
@@ -78,6 +71,8 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 	instance := params.ProviderInstance{
 		ProviderID: instanceID,
 		Name:       spec.BootstrapParams.Name,
+		OSType:     spec.BootstrapParams.OSType,
+		OSArch:     spec.BootstrapParams.OSArch,
 		Status:     "running",
 	}
 
@@ -86,21 +81,32 @@ func (a *AwsProvider) CreateInstance(ctx context.Context, bootstrapParams params
 }
 
 func (a *AwsProvider) DeleteInstance(ctx context.Context, instance string) error {
-	// Clear the security group
-	if err := a.awsCli.DeleteSecurityGroup(ctx, a.cfg.VpcID); err != nil {
-		return fmt.Errorf("failed to delete security group: %w", err)
+	var inst string
+	if strings.HasPrefix(instance, "i-") {
+		inst = instance
+	} else {
+		tags := map[string]string{
+			"GARM_CONTROLLER_ID": "",
+			"Name":               instance,
+		}
+
+		tmp, err := a.awsCli.FindInstanceByTags(ctx, tags)
+		if err != nil {
+			if errors.Is(err, garmErrors.ErrNotFound) {
+				return nil
+			}
+			return fmt.Errorf("failed to determine instance: %w", err)
+		}
+		inst = *tmp.InstanceId
 	}
 
-	// Terminate the instance
-	awsInstance, err := a.awsCli.GetInstance(ctx, instance)
-	if err != nil {
-		return fmt.Errorf("failed to find the instance: %w", err)
-	}
-	if awsInstance == nil {
+	if inst == "" {
 		return nil
 	}
-	awsInstanceID := *awsInstance.InstanceId
-	a.awsCli.TerminateInstance(ctx, awsInstanceID)
+
+	if err := a.awsCli.TerminateInstance(ctx, inst); err != nil {
+		return fmt.Errorf("failed to terminate instance: %w", err)
+	}
 
 	return nil
 }

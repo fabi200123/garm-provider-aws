@@ -15,10 +15,12 @@
 package config
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/BurntSushi/toml"
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 )
 
@@ -36,9 +38,10 @@ func NewConfig(cfgFile string) (*Config, error) {
 }
 
 type Config struct {
-	Credentials Credentials `toml:"credentials"`
-	VpcID       string      `toml:"vpc_id"`
-	Region      string      `toml:"region"`
+	Credentials      Credentials `toml:"credentials"`
+	SubnetID         string      `toml:"subnet_id"`
+	Region           string      `toml:"region"`
+	AvailabilityZone string      `toml:"availability_zone"`
 }
 
 func (c *Config) Validate() error {
@@ -86,6 +89,25 @@ func (c Credentials) GetCredentials() (aws.Credentials, error) {
 	}
 
 	return creds, nil
+}
+
+func (c Config) GetAWSConfig(ctx context.Context) (aws.Config, error) {
+	if err := c.Credentials.Validate(); err != nil {
+		return aws.Config{}, fmt.Errorf("failed to validate credentials: %w", err)
+	}
+
+	cfg, err := config.LoadDefaultConfig(ctx,
+		config.WithCredentialsProvider(
+			credentials.NewStaticCredentialsProvider(
+				c.Credentials.AccessKeyID,
+				c.Credentials.SecretAccessKey,
+				c.Credentials.SessionToken)),
+		config.WithRegion(c.Region),
+	)
+	if err != nil {
+		return aws.Config{}, fmt.Errorf("failed to get aws config: %w", err)
+	}
+	return cfg, nil
 }
 
 // StaticCredentialsProvider creates a credentials provider from static credentials.
